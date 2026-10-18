@@ -13,6 +13,11 @@
     <span class="brand-dot"></span>
     <span class="brand-text">YCence</span>
   </a>
+
+  <div class="qq-badge" title="点击复制 QQ 群号" id="qq-badge">
+    QQ 群：<b>1104741855</b>
+  </div>
+
   <nav class="crumb" id="crumb"><span>主页</span></nav>
 </header>
 
@@ -43,6 +48,28 @@
     </a>
   </div>
 </main>
+
+<div class="toast" id="toast">已复制 QQ 群号</div>
+
+<script>
+  document.getElementById('qq-badge').addEventListener('click', async () => {
+    const num = '1104741855';
+    try {
+      await navigator.clipboard.writeText(num);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = num;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    const t = document.getElementById('toast');
+    t.classList.add('show');
+    clearTimeout(window.__qqToastTimer);
+    window.__qqToastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+  });
+</script>
 
 </body>
 </html>
