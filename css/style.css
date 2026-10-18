@@ -345,3 +345,34 @@ textarea.js-input:focus {
   .topbar { padding: 12px 16px; }
   .about-card { padding: 22px; }
 }
+/* QQ 群徽标 */
+.qq-badge {
+  margin-left: 18px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--dim);
+  background: rgba(255, 140, 26, 0.08);
+  border: 1px solid rgba(255, 140, 26, 0.28);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.qq-badge b {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.qq-badge:hover {
+  background: rgba(255, 140, 26, 0.16);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.qq-badge:active {
+  transform: scale(0.97);
+}
+
+@media (max-width: 640px) {
+  .qq-badge { margin-left: 10px; padding: 5px 9px; font-size: 12px; }
+}
