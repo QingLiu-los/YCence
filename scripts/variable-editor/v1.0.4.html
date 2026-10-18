@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变量修改器 v1.0.4 · YCence</title>
+<link rel="stylesheet" href="../../css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="../../index.html">
+    <span class="brand-dot"></span>
+    <span class="brand-text">YCence</span>
+  </a>
+  <nav class="crumb">
+    <a href="../../index.html">主页</a> <span>/</span>
+    <a href="../index.html">JS 脚本</a> <span>/</span>
+    <a href="index.html">变量修改器</a> <span>/</span>
+    <b>v1.0.4</b>
+  </nav>
+</header>
+
+<main>
+  <a class="back-btn" href="index.html">← 返回版本列表</a>
+  <div class="section-title">变量修改器 · v1.0.4 <span class="version-tag latest" style="margin-left:8px">至臻</span></div>
+
+  <div class="code-toolbar">
+    <button class="btn primary" id="copy-btn">📋 复制脚本</button>
+    <span style="font-size:12px;color:var(--dim)">粘贴到篡改猴/暴力猴 → 保存 → 硬刷新 CCW 作品页</span>
+  </div>
+
+<textarea readonly class="code-area" id="code-area">// ==UserScript==
+// @name         变量修改器
+// @namespace    https://example.com/variable-editor
+// @version      1.0.4
+// @description  在 Scratch 中可视化修改角色变量并支持锁定（安全扩展兼容版）
+// @match        https://scratch.mit.edu/*
+// @match        https://gonfunko.github.io/scratch-gui/*
+// @match        https://aerfaying.com/*
+// @match        https://www.ccw.site/detail/*
+// @match        https://www.ccw.site/gandi*
+// @match        https://www.ccw.site/creator*
+// @match        https://gitblock.cn/*
+// @match        https://world.xiaomawang.com/*
+// @match        https://www.cocrea.world/*
+// @match        https://create.codelab.club/*
+// @match        https://addon.codelab.club/*
+// @match        https://www.scratch-cn.cn/*
+// @match        https://40code.com/embed*
+// @match        https://turbowarp.org/*
+// @match        https://codingclip.com/*
+// @match        https://editor.turbowarp.cn/*
+// @match        https://0832.ink/rc/*
+// @match        https://studio.penguinmod.com/*
+// @match        https://codinghou.cn/*
+// @match        https://s3player.hetao101.com/*
+// @match        https://www.matinslab.com/scratch/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+
+/* 完整脚本见对话中 1.0.4 版本原文，整段粘贴到此处 */
+</textarea>
+
+</main>
+
+<div class="toast" id="toast">已复制到剪贴板</div>
+
+<script>
+  document.getElementById('copy-btn').addEventListener('click', async () => {
+    const ta = document.getElementById('code-area');
+    try {
+      await navigator.clipboard.writeText(ta.value);
+      showToast('已复制到剪贴板');
+    } catch {
+      ta.select();
+      document.execCommand('copy');
+      showToast('已复制到剪贴板');
+    }
+  });
+
+  function showToast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+</script>
+
+</body>
+</html>

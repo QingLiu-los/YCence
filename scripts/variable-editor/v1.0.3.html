@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变量修改器 v1.0.3 · YCence</title>
+<link rel="stylesheet" href="../../css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="../../index.html">
+    <span class="brand-dot"></span>
+    <span class="brand-text">YCence</span>
+  </a>
+  <nav class="crumb">
+    <a href="../../index.html">主页</a> <span>/</span>
+    <a href="../index.html">JS 脚本</a> <span>/</span>
+    <a href="index.html">变量修改器</a> <span>/</span>
+    <b>v1.0.3</b>
+  </nav>
+</header>
+
+<main>
+  <a class="back-btn" href="index.html">← 返回版本列表</a>
+  <div class="section-title">变量修改器 · v1.0.3</div>
+
+  <div class="code-toolbar">
+    <button class="btn primary" id="copy-btn">📋 复制脚本</button>
+    <span style="font-size:12px;color:var(--dim)">安全扩展兼容：移除 bind 劫持、VM 轮询重试、UI 先出现</span>
+  </div>
+
+<textarea readonly class="code-area" id="code-area">// ==UserScript==
+// @name         变量修改器
+// @namespace    https://example.com/variable-editor
+// @version      1.0.3
+// @description  在 Scratch 中可视化修改角色变量并支持锁定（安全扩展兼容版）
+// @match        https://scratch.mit.edu/*
+// @match        https://gonfunko.github.io/scratch-gui/*
+// @match        https://aerfaying.com/*
+// @match        https://www.ccw.site/detail/*
+// @match        https://www.ccw.site/gandi*
+// @match        https://www.ccw.site/creator*
+// @match        https://gitblock.cn/*
+// @match        https://world.xiaomawang.com/*
+// @match        https://www.cocrea.world/*
+// @match        https://create.codelab.club/*
+// @match        https://addon.codelab.club/*
+// @match        https://www.scratch-cn.cn/*
+// @match        https://40code.com/embed*
+// @match        https://turbowarp.org/*
+// @match        https://codingclip.com/*
+// @match        https://editor.turbowarp.cn/*
+// @match        https://0832.ink/rc/*
+// @match        https://studio.penguinmod.com/*
+// @match        https://codinghou.cn/*
+// @match        https://s3player.hetao101.com/*
+// @match        https://www.matinslab.com/scratch/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+
+(function (self) {
+  "use strict";
+
+  const THEME_COLOR = "rgb(255, 140, 26)";
+  const THEME_DARK = "rgb(204, 112, 20)";
+  const PANEL_TEXT = "#222";
+  const BORDER_COLOR = "#e2e2e2";
+  const BG_COLOR = "#fff";
+  const ITEM_BG = "#fafafa";
+  const LOG_PREFIX = "[变量修改器]";
+
+  const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" style="-ms-transform:rotate(360deg);-webkit-transform:rotate(360deg);transform:rotate(360deg)"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.649 3.084A1 1 0 0 1 5.163 4.4 13.95 13.95 0 0 0 4 10c0 1.993.416 3.886 1.164 5.6a1 1 0 0 1-1.832.8A15.95 15.95 0 0 1 2 10c0-2.274.475-4.44 1.332-6.4a1 1 0 0 1 1.317-.516zM12.96 7a3 3 0 0 0-2.342 1.126l-.328.41-.111-.279A2 2 0 0 0 8.323 7H8a1 1 0 0 0 0 2h.323l.532 1.33-1.035 1.295a1 1 0 0 1-.781.375H7a1 1 0 1 0 0 2h.039a3 3 0 0 0 2.342-1.126l.328-.41.111.279A2 2 0 0 0 11.677 14H12a1 1 0 1 0 0-2h-.323l-.532-1.33 1.035-1.295A1 1 0 0 1 12.961 9H13a1 1 0 1 0 0-2h-.039zm1.874-2.6a1 1 0 0 1 1.833-.8A15.95 15.95 0 0 1 18 10c0 2.274-.475 4.44-1.332 6.4a1 1 0 1 1-1.832-.8A13.949 13.949 0 0 0 16 10c0-1.993-.416-3.886-1.165-5.6z" fill="#fff"/><path fill="rgba(0, 0, 0, 0)" d="M0 0h20v20H0z"/></svg>`;
+  const LOGO_URI = `data:image/svg+xml;utf8,${encodeURIComponent(LOGO_SVG)}`;
+
+  const frozenVars = new Map();
+
+  let runtime = null;
+  let vm = null;
+  let syncTimer = 0;
+  let selectedSprite = null;
+  let selectedCloneIndex = 0;
+  let lastFocusedInput = null;
+  let currentInputMap = {};
+  let ui = null;
+  let vmRetryTimer = 0;
+  let vmRetryCount = 0;
+  const MAX_VM_RETRY = 40;
+
+  onReady(() => {
+    ui = createUi();
+    bindUiEvents();
+    startVmRetry();
+  });
+
+  function onReady(fn) {
+    if (document.body) fn();
+    else document.addEventListener("DOMContentLoaded", fn, { once: true });
+  }
+
+  function log(msg, isErr) {
+    (isErr ? console.warn : console.log)(LOG_PREFIX, msg);
+  }
+
+  function startVmRetry() {
+    if (vmRetryTimer) clearInterval(vmRetryTimer);
+    vmRetryCount = 0;
+    vmRetryTimer = setInterval(() => {
+      vmRetryCount += 1;
+      if (vm) {
+        clearInterval(vmRetryTimer);
+        vmRetryTimer = 0;
+        return;
+      }
+      try {
+        const got = getVMOnce();
+        if (got) {
+          vm = got;
+          runtime = vm?.runtime || self?.Scratch?.runtime || null;
+          if (vm && runtime) {
+            clearInterval(vmRetryTimer);
+            vmRetryTimer = 0;
+            log("已获取 VM");
+            renderSpriteList();
+            startSyncLoop();
+          } else {
+            vm = null;
+            runtime = null;
+          }
+        }
+      } catch {
+        // 静默重试
+      }
+      if (vmRetryCount >= MAX_VM_RETRY) {
+        clearInterval(vmRetryTimer);
+        vmRetryTimer = 0;
+        log("获取 VM 超时，可点击“刷新”手动重试", true);
+      }
+    }, 500);
+  }
+
+  // 1.0.3：只走 eureka / Redux，不劫持 bind
+  function getVMOnce() {
+    const _vm =
+      self?.eureka?.vm ||
+      self?.Scratch?.vm ||
+      self?.Scratch?.runtime?.extensionManager?.vm;
+    if (_vm) return _vm;
+
+    return getReduxStoreFromDOM();
+  }
+
+  function getReduxStoreFromDOM() {
+    try {
+      if (self.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+        const roots = self.__REACT_DEVTOOLS_GLOBAL_HOOK__.getFiberRoots?.(1) || [];
+        for (const root of roots) {
+          const store = findReduxStore(root);
+          if (store) return store?.getState?.()?.scratchGui?.vm || null;
+        }
+      }
+
+      const elements = document.querySelectorAll("*");
+      for (const el of elements) {
+        try {
+          const key = Object.keys(el).find((k) => k.includes("__reactContainer"));
+          if (!key || !el[key]) continue;
+          const store = searchReactTreeSafe(el[key]);
+          if (store) return store?.getState?.()?.scratchGui?.vm || null;
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      log("Redux Store 检索失败", true);
+    }
+    return null;
+
+    function findReduxStore(obj, seen = new Set()) {
+      if (!obj || seen.has(obj)) return null;
+      seen.add(obj);
+      try {
+        if (obj?.memoizedState?.state?.scratchGui?.vm) return obj.memoizedState.state;
+        if (obj?.stateNode?.state?.scratchGui?.vm) return obj.stateNode;
+        if (obj?.getState?.()?.scratchGui?.vm) return obj;
+        for (const key in obj) {
+          const value = obj[key];
+          if (value && typeof value === "object") {
+            const found = findReduxStore(value, seen);
+            if (found) return found;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return null;
+    }
+
+    function searchReactTreeSafe(obj, seen = new Set()) {
+      if (!obj || seen.has(obj)) return null;
+      seen.add(obj);
+      try {
+        if (obj.getState) {
+          const state = obj.getState();
+          if (state?.scratchGui?.vm) return obj;
+        }
+        for (const key in obj) {
+          const value = obj[key];
+          if (value && typeof value === "object") {
+            const found = searchReactTreeSafe(value, seen);
+            if (found) return found;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return null;
+    }
+  }
+
+  function renderSpriteList() {
+    if (!vm?.runtime?.targets) return;
+    const sprites = vm.runtime.targets
+      .filter((t) => t.isOriginal && t.sprite)
+      .map((t) => t.sprite);
+
+    ui.spriteList.innerHTML = "";
+
+    if (!sprites.length) {
+      ui.spriteList.appendChild(createEmpty("(无角色)"));
+      return;
+    }
+
+    sprites.forEach((sprite) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.style.border = `1px solid ${BORDER_COLOR}`;
+      card.style.background = ITEM_BG;
+      card.style.borderRadius = "8px";
+      card.style.padding = "6px";
+      card.style.cursor = "pointer";
+      card.style.display = "flex";
+      card.style.flexDirection = "column";
+      card.style.alignItems = "center";
+      card.style.gap = "4px";
+
+      const img = document.createElement("img");
+      try {
+        img.src = sprite.costumes?.[0]?.asset?.encodeDataURI?.() || "";
+      } catch {
+        img.src = "";
+      }
+      img.alt = sprite.name || "";
+      img.style.width = "100%";
+      img.style.aspectRatio = "1 / 1";
+      img.style.objectFit = "contain";
+
+      const name = document.createElement("div");
+      name.className = "item-name";
+      name.textContent = sprite.name || "(未命名)";
+      name.style.width = "100%";
+      name.style.fontSize = "12px";
+      name.style.overflow = "hidden";
+      name.style.whiteSpace = "nowrap";
+      name.style.textOverflow = "ellipsis";
+
+      card.addEventListener("click", () => {
+        selectedSprite = sprite;
+        selectedCloneIndex = 0;
+        renderSpriteSelection();
+        renderVariableList();
+      });
+
+      card.appendChild(img);
+      card.appendChild(name);
+      ui.spriteList.appendChild(card);
+    });
+
+    if (!selectedSprite && sprites.length) {
+      selectedSprite = sprites[0];
+      selectedCloneIndex = 0;
+      renderVariableList();
+    }
+    renderSpriteSelection();
+  }
+
+  function renderSpriteSelection() {
+    Array.from(ui.spriteList.children).forEach((node) => {
+      const isSelected = node.querySelector(".item-name")?.textContent === selectedSprite?.name;
+      node.style.outline = isSelected ? `2px solid ${THEME_COLOR}` : "none";
+      node.style.background = isSelected ? "#fff7ef" : ITEM_BG;
+    });
+  }
+
+  function renderVariableList() {
+    ui.varList.innerHTML = "";
+    currentInputMap = {};
+
+    const target = getSelectedTarget();
+    if (!target) {
+      ui.varList.appendChild(createEmpty("(无目标)"));
+      return;
+    }
+
+    const variables = Object.values(target.variables || {});
+    ui.cloneInput.max = String(selectedSprite?.clones?.length || 1);
+    ui.cloneInput.value = String(selectedCloneIndex + 1);
+
+    if (!variables.length) {
+      ui.varList.appendChild(createEmpty("(无变量)"));
+      return;
+    }
+
+    variables.forEach((variable) => {
+      const isListVar = variable.type === "list";
+      const row = document.createElement("div");
+      row.style.display = "grid";
+      row.style.gridTemplateColumns = "110px 1fr auto";
+      row.style.gap = "6px";
+      row.style.alignItems = "center";
+      row.style.padding = "6px";
+      row.style.border = `1px solid ${BORDER_COLOR}`;
+      row.style.borderRadius = "8px";
+      row.style.background = ITEM_BG;
+
+      const name = document.createElement("div");
+      name.className = "item-name";
+      name.textContent = variable.name;
+      name.style.fontSize = "12px";
+      name.style.overflow = "hidden";
+      name.style.whiteSpace = "nowrap";
+      name.style.textOverflow = "ellipsis";
+
+      const input = isListVar ? document.createElement("textarea") : document.createElement("input");
+      styleInput(input);
+      if (isListVar) {
+        input.style.minHeight = "70px";
+        input.style.resize = "vertical";
+        input.style.lineHeight = "1.4";
+      }
+      input.style.fontFamily = "Consolas, Menlo, Monaco, monospace";
+      input.value = formatVariableValue(variable);
+      input.dataset.varId = variable.id;
+
+      input.addEventListener("focus", () => { lastFocusedInput = input; });
+      input.addEventListener("blur", () => { lastFocusedInput = null; });
+      input.addEventListener("change", () => {
+        applyInputToVariable(target, variable.id, input.value, isListVar);
+      });
+
+      const lockBtn = document.createElement("button");
+      const lockKey = buildLockKey(target, variable.id);
+      updateLockButton(lockBtn, frozenVars.has(lockKey));
+      styleLockButton(lockBtn);
+      lockBtn.addEventListener("click", () => {
+        if (!target?.variables?.[variable.id]) return;
+        const parsed = isListVar ? parseListValue(input.value) : parseValue(input.value);
+        target.variables[variable.id].value = parsed;
+        if (frozenVars.has(lockKey)) {
+          frozenVars.delete(lockKey);
+          updateLockButton(lockBtn, false);
+          input.disabled = false;
+        } else {
+          frozenVars.set(lockKey, { target, variableId: variable.id, value: parsed });
+          updateLockButton(lockBtn, true);
+          input.disabled = true;
+        }
+      });
+
+      input.disabled = frozenVars.has(lockKey);
+      if (isListVar) name.title = `${variable.name}（列表）`;
+
+      row.appendChild(name);
+      row.appendChild(input);
+      row.appendChild(lockBtn);
+      ui.varList.appendChild(row);
+      currentInputMap[variable.id] = input;
+    });
+
+    filterItems(ui.varList, ui.varSearch.value, ".item-name");
+  }
+
+  function getSelectedTarget() {
+    if (!selectedSprite || !selectedSprite.clones?.length) return null;
+    if (selectedCloneIndex >= selectedSprite.clones.length) {
+      selectedCloneIndex = selectedSprite.clones.length - 1;
+    }
+    return selectedSprite.clones[selectedCloneIndex] || null;
+  }
+
+  function applyInputToVariable(target, variableId, rawInput, forceList = false) {
+    if (!target?.variables?.[variableId]) return;
+    const variable = target.variables[variableId];
+    const value = forceList || variable?.type === "list" ? parseListValue(rawInput) : parseValue(rawInput);
+    target.variables[variableId].value = value;
+    const lockKey = buildLockKey(target, variableId);
+    if (frozenVars.has(lockKey)) {
+      const lockData = frozenVars.get(lockKey);
+      lockData.value = value;
+      frozenVars.set(lockKey, lockData);
+    }
+  }
+
+  function startSyncLoop() {
+    if (syncTimer) clearInterval(syncTimer);
+    syncTimer = setInterval(() => {
+      try {
+        frozenVars.forEach((data, key) => {
+          if (!data.target?.variables?.[data.variableId]) {
+            frozenVars.delete(key);
+            return;
+          }
+          data.target.variables[data.variableId].value = data.value;
+        });
+
+        const target = getSelectedTarget();
+        if (target && currentInputMap) {
+          Object.entries(currentInputMap).forEach(([variableId, input]) => {
+            const variable = target.variables?.[variableId];
+            if (!variable) return;
+            if (input === lastFocusedInput) return;
+            const content = formatVariableValue(variable);
+            if (input.value !== content) input.value = content;
+          });
+        }
+      } catch (err) {
+        log("同步循环异常", true);
+      }
+    }, 500);
+  }
+
+  function formatVariableValue(variable) {
+    if (!variable) return "";
+    if (variable.type === "list") return formatListValue(variable.value);
+    return formatValue(variable.value);
+  }
+
+  function formatValue(value) {
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+
+  function parseValue(input) {
+    const trimmed = String(input).trim();
+    if (trimmed === "") return "";
+    try { return JSON.parse(trimmed); }
+    catch {
+      const n = Number(trimmed);
+      if (!Number.isNaN(n) && trimmed !== "") return n;
+      if (trimmed === "true") return true;
+      if (trimmed === "false") return false;
+      return input;
+    }
+  }
+
+  function formatListValue(value) {
+    const arrayValue = Array.isArray(value) ? value : [];
+    try { return JSON.stringify(arrayValue, null, 2); } catch { return "[]"; }
+  }
+
+  function parseListValue(input) {
+    const raw = String(input ?? "").trim();
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      return [parsed];
+    } catch {
+      const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+      return lines.map((line) => {
+        try { return JSON.parse(line); } catch { return line; }
+      });
+    }
+  }
+
+  function buildLockKey(target, variableId) {
+    const targetId = target?.id || target?.drawableID || "unknown-target";
+    return `${targetId}:${variableId}`;
+  }
+
+  function filterItems(container, keyword, textSelector) {
+    const normalized = String(keyword || "").toLowerCase();
+    let visible = 0;
+    Array.from(container.children).forEach((node) => {
+      if (node.classList.contains("empty-node")) return;
+      const text = node.querySelector(textSelector)?.textContent?.toLowerCase() || "";
+      const match = !normalized || text.includes(normalized);
+      node.style.display = match ? "" : "none";
+      if (match) visible += 1;
+    });
+
+    const oldEmpty = container.querySelector(".empty-node");
+    if (oldEmpty) oldEmpty.remove();
+    if (visible === 0) container.appendChild(createEmpty("(无结果)"));
+  }
+
+  function createEmpty(text) {
+    const node = document.createElement("div");
+    node.className = "empty-node";
+    node.textContent = text;
+    node.style.textAlign = "center";
+    node.style.color = "#888";
+    node.style.padding = "16px 8px";
+    return node;
+  }
+
+  function styleInput(input) {
+    input.style.width = "100%";
+    input.style.boxSizing = "border-box";
+    input.style.border = `1px solid ${BORDER_COLOR}`;
+    input.style.borderRadius = "6px";
+    input.style.padding = "6px 8px";
+    input.style.outline = "none";
+    input.addEventListener("focus", () => {
+      input.style.borderColor = THEME_COLOR;
+      input.style.boxShadow = `0 0 0 2px rgba(255, 140, 26, 0.2)`;
+    });
+    input.addEventListener("blur", () => {
+      input.style.borderColor = BORDER_COLOR;
+      input.style.boxShadow = "none";
+    });
+  }
+
+  function stylePrimaryButton(btn) {
+    btn.style.border = "none";
+    btn.style.borderRadius = "6px";
+    btn.style.padding = "6px 10px";
+    btn.style.cursor = "pointer";
+    btn.style.background = THEME_COLOR;
+    btn.style.color = "#fff";
+  }
+
+  function styleLockButton(btn) {
+    btn.style.border = "none";
+    btn.style.borderRadius = "6px";
+    btn.style.padding = "6px 8px";
+    btn.style.cursor = "pointer";
+    btn.style.background = THEME_COLOR;
+    btn.style.color = "#fff";
+    btn.style.fontSize = "12px";
+  }
+
+  function updateLockButton(btn, locked) {
+    btn.textContent = locked ? "🔓" : "🔒";
+    btn.title = locked ? "解锁变量" : "锁定变量";
+    btn.style.opacity = locked ? "0.8" : "1";
+  }
+
+  function makeDraggable({ element, handle = element, bounds = false, preventOnButton = false, clickThreshold = 0, onTap = null }) {
+    let isDragging = false;
+    let moved = false;
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+    const getPos = (e) => ({
+      clientX: e.clientX ?? e.touches?.[0]?.clientX ?? 0,
+      clientY: e.clientY ?? e.touches?.[0]?.clientY ?? 0,
+    });
+
+    const onStart = (e) => {
+      if (preventOnButton && e.target?.closest?.("button")) return;
+      isDragging = true;
+      moved = false;
+      const { clientX, clientY } = getPos(e);
+      startX = clientX;
+      startY = clientY;
+      const rect = element.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      element.style.right = "auto";
+      element.style.bottom = "auto";
+      e.preventDefault();
+    };
+
+    const onMove = (e) => {
+      if (!isDragging) return;
+      const { clientX, clientY } = getPos(e);
+      const dx = clientX - startX;
+      const dy = clientY - startY;
+      if (Math.abs(dx) > clickThreshold || Math.abs(dy) > clickThreshold) moved = true;
+
+      let left = startLeft + dx;
+      let top = startTop + dy;
+      if (bounds) {
+        const maxLeft = Math.max(0, window.innerWidth - element.offsetWidth);
+        const maxTop = Math.max(0, window.innerHeight - element.offsetHeight);
+        left = Math.max(0, Math.min(maxLeft, left));
+        top = Math.max(0, Math.min(maxTop, top));
+      }
+      element.style.left = `${left}px`;
+      element.style.top = `${top}px`;
+      e.preventDefault();
+    };
+
+    const onEnd = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      if (!moved && typeof onTap === "function") onTap();
+    };
+
+    handle.addEventListener("mousedown", onStart);
+    handle.addEventListener("touchstart", onStart, { passive: false });
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("mouseup", onEnd);
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+  }
+
+  window.addEventListener("beforeunload", () => {
+    if (syncTimer) clearInterval(syncTimer);
+    if (vmRetryTimer) clearInterval(vmRetryTimer);
+  });
+})(typeof unsafeWindow !== "undefined" ? unsafeWindow : window);
+</textarea>
+
+</main>
+
+<div class="toast" id="toast">已复制到剪贴板</div>
+
+<script>
+  document.getElementById('copy-btn').addEventListener('click', async () => {
+    const ta = document.getElementById('code-area');
+    try {
+      await navigator.clipboard.writeText(ta.value);
+      showToast('已复制到剪贴板');
+    } catch {
+      ta.select();
+      document.execCommand('copy');
+      showToast('已复制到剪贴板');
+    }
+  });
+  function showToast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+</script>
+
+</body>
+</html>

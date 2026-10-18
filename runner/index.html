@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直接运行 JS · YCence</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-dot"></span>
+    <span class="brand-text">YCence</span>
+  </a>
+  <nav class="crumb">
+    <a href="../index.html">主页</a> <span>/</span> <b>直接运行 JS</b>
+  </nav>
+</header>
+
+<main>
+  <a class="back-btn" href="../index.html">← 返回主页</a>
+  <div class="section-title">直接运行 JS</div>
+
+  <div class="runner-area">
+    <textarea class="js-input" id="js-input" spellcheck="false" placeholder="// 在这里输入 JavaScript，例如：
+// console.log('Hello YCence');
+// 1 + 1"></textarea>
+    <div style="display:flex;gap:10px;">
+      <button class="btn primary" id="run-btn">▶ 运行</button>
+      <button class="btn" id="clear-btn">清空</button>
+    </div>
+    <div class="output-area" id="output">等待运行…</div>
+  </div>
+</main>
+
+<script>
+  const input = document.getElementById('js-input');
+  const output = document.getElementById('output');
+  const runBtn = document.getElementById('run-btn');
+  const clearBtn = document.getElementById('clear-btn');
+
+  function append(text, cls) {
+    const span = document.createElement('div');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    output.appendChild(span);
+  }
+
+  runBtn.addEventListener('click', () => {
+    output.innerHTML = '';
+    const code = input.value;
+    if (!code.trim()) {
+      append('（空白代码，未执行）', 'dim');
+      return;
+    }
+    const logs = [];
+    const fakeConsole = {
+      log: (...a) => logs.push({ type: 'log', args: a }),
+      warn: (...a) => logs.push({ type: 'warn', args: a }),
+      error: (...a) => logs.push({ type: 'error', args: a }),
+    };
+    try {
+      const fn = new Function('console', code);
+      const result = fn(fakeConsole);
+      if (logs.length) {
+        logs.forEach(l => {
+          const cls = l.type === 'error' ? 'err' : l.type === 'warn' ? 'dim' : 'ok';
+          append(`[${l.type}] ` + l.args.map(fmt).join(' '), cls);
+        });
+      }
+      if (result !== undefined) append('← ' + fmt(result), 'ok');
+      if (!logs.length && result === undefined) append('（执行完成，无输出）', 'dim');
+    } catch (err) {
+      append('❌ ' + (err && err.message ? err.message : String(err)), 'err');
+    }
+  });
+
+  clearBtn.addEventListener('click', () => {
+    input.value = '';
+    output.textContent = '等待运行…';
+  });
+
+  function fmt(v) {
+    if (typeof v === 'string') return v;
+    try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+  }
+</script>
+
+</body>
+</html>
